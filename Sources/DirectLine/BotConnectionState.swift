@@ -5,6 +5,7 @@ public enum BotConnectionState: Equatable {
     case connecting
     case ready(Conversation)
     case failed(BotConnectionError)
+    case tokenExpired(Conversation)
 }
 
 internal extension BotConnectionState {
@@ -16,10 +17,19 @@ internal extension BotConnectionState {
             return false
         }
     }
+    
+    var isNeedConnect: Bool {
+        switch self {
+        case .uninitialized, .tokenExpired:
+            return true
+        default:
+            return false
+        }
+    }
 
     func conversation() throws -> Conversation {
         switch self {
-        case let .ready(conversation):
+        case let .ready(conversation), let .tokenExpired(conversation):
             return conversation
         case let .failed(error):
             throw error

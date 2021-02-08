@@ -4,6 +4,9 @@ import Logging
 import SimpleNetworking
 
 public class BotConnection<ChannelData> where ChannelData: Codable, ChannelData: Equatable {
+    public typealias ActivityStream = Publishers.Share<Publishers.FlatMap<Publishers.Sequence<[Activity<ChannelData>], Error>,
+                                                                          AnyPublisher<ActivityGroup<ChannelData>, Error>>>
+    
     public var state: AnyPublisher<BotConnectionState, Never> {
         stateSubject.eraseToAnyPublisher()
     }
@@ -24,6 +27,21 @@ public class BotConnection<ChannelData> where ChannelData: Codable, ChannelData:
         apiClient = APIClient(baseURL: .directLine, logLevel: logLevel)
         logger.logLevel = logLevel
     }
+    
+    public func getActivityStream() -> ActivityStream {
+        conversation()
+            .activityStream(ChannelData.self, logLevel: logger.logLevel)
+            .flatMap { Publishers.Sequence(sequence: $0.activities) }
+            .share()
+    }
+    
+    public func resetState() {
+        switch stateSubject.value {
+        case let .ready(conversation), let .tokenExpired(conversation):
+            stateSubject.send(.tokenExpired(conversation))
+        default: break
+        }
+    }
 
     /// Send an activity to the bot.
     /// - Parameter activity: Activity to send.
@@ -33,8 +51,17 @@ public class BotConnection<ChannelData> where ChannelData: Codable, ChannelData:
             .flatMap { [apiClient] conversation -> AnyPublisher<ResourceResponse, BotConnectionError> in
                 // Post the activity in the conversation
                 apiClient.response(for: .postActivity(token: conversation.token, conversationId: conversation.conversationId, activity: activity))
-                    .mapError { BotConnectionError(error: $0) }
+                    .mapError {
+                        let error = BotConnectionError(error: $0)
+                        if error == .tokenExpired {
+                            self.stateSubject.send(.tokenExpired(conversation))
+                        }
+                        return error
+                    }
                     .eraseToAnyPublisher()
+            }
+            .retry(1) { error in
+                return error == .tokenExpired
             }
             .eraseToAnyPublisher()
     }
@@ -47,8 +74,8 @@ private extension BotConnection {
             .setFailureType(to: BotConnectionError.self)
             .receive(on: syncQueue)
             .flatMap { [weak self] connectionState -> AnyPublisher<BotConnectionState, BotConnectionError> in
-                // Start a new conversation if necessary
-                guard let self = self, case .uninitialized = connectionState else {
+                // Start a new conversation if necessary of reconnect
+                guard let self = self, connectionState.isNeedConnect else {
                     return Just(connectionState)
                         .setFailureType(to: BotConnectionError.self)
                         .eraseToAnyPublisher()
@@ -57,7 +84,14 @@ private extension BotConnection {
                 // Let subscribers know that we are connecting
                 self.stateSubject.send(.connecting)
 
-                return self.startConversation()
+                let publisher: AnyPublisher<Conversation, BotConnectionError>
+                if case let .tokenExpired(conversation) = connectionState {
+                    publisher = self.restartConversation(conversation.conversationId)
+                } else {
+                    publisher = self.startConversation()
+                }
+
+                return publisher
                     .map { BotConnectionState.ready($0) }
                     // Let subscribers know that we are ready
                     .handleEvents(receiveOutput: { self.stateSubject.send($0) })
@@ -72,6 +106,13 @@ private extension BotConnection {
     /// Start a new conversation.
     func startConversation() -> AnyPublisher<Conversation, BotConnectionError> {
         apiClient.response(for: .startConversation(auth))
+            .mapError { BotConnectionError(error: $0) }
+            .receive(on: syncQueue)
+            .eraseToAnyPublisher()
+    }
+    
+    func restartConversation(_ conversationId: String) -> AnyPublisher<Conversation, BotConnectionError> {
+        apiClient.response(for: .conversation(auth, conversationId: conversationId))
             .mapError { BotConnectionError(error: $0) }
             .receive(on: syncQueue)
             .eraseToAnyPublisher()

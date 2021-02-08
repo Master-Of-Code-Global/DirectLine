@@ -2,9 +2,9 @@ import Foundation
 import SimpleNetworking
 
 public enum BotConnectionError: Equatable, Error {
-    case failedToConnect
+    case failedToConnect(String?)
     case tokenExpired
-    case badArgument
+    case badArgument(String?)
     case conversationEnded
 }
 
@@ -17,12 +17,12 @@ internal extension BotConnectionError {
             case .tokenExpired:
                 self = .tokenExpired
             case .badArgument:
-                self = .badArgument
+                self = .badArgument(errorResponse.error.message)
             default:
-                self = .failedToConnect
+                self = .failedToConnect(errorResponse.error.message)
             }
         } else {
-            self = .failedToConnect
+            self = .failedToConnect(nil)
         }
     }
 }
