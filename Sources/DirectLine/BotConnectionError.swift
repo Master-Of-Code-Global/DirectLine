@@ -6,6 +6,7 @@ public enum BotConnectionError: Equatable, Error {
     case tokenExpired
     case badArgument(String?)
     case conversationEnded
+    case socketPing(String?)
 }
 
 internal extension BotConnectionError {
@@ -24,5 +25,9 @@ internal extension BotConnectionError {
         } else {
             self = .failedToConnect(nil)
         }
+    }
+
+    init(socketError: Error) {
+        self = .socketPing(socketError.localizedDescription)
     }
 }

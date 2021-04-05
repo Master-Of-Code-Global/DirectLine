@@ -3,6 +3,7 @@ import Foundation
 public enum BotConnectionState: Equatable {
     case uninitialized
     case connecting
+    case connectingFailed
     case ready(Conversation)
     case failed(BotConnectionError)
     case tokenExpired(Conversation)
@@ -20,7 +21,7 @@ internal extension BotConnectionState {
     
     var isNeedConnect: Bool {
         switch self {
-        case .uninitialized, .tokenExpired:
+        case .uninitialized, .tokenExpired, .connectingFailed:
             return true
         default:
             return false

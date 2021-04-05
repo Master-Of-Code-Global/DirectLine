@@ -99,7 +99,12 @@ private extension BotConnection {
             }
             .filter { $0.isReadyOrHasFailed }
             .tryMap { try $0.conversation() }
-            .mapError { BotConnectionError(error: $0) }
+            .mapError {
+                if self.stateSubject.value == .connecting {
+                    self.stateSubject.send(.connectingFailed)
+                }
+                return BotConnectionError(error: $0)
+            }
             .eraseToAnyPublisher()
     }
 
