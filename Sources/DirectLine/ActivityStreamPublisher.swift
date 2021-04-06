@@ -56,6 +56,23 @@ private final class ActivityStreamSubscription<S, ChannelData>: Subscription whe
         if case .suspended = webSocketTask.state, hasDemand {
             scheduleNextReceive()
             webSocketTask.resume()
+            ping()
+        }
+    }
+
+    func ping() {
+        logger.debug("[WebSocket] Send ping")
+        webSocketTask.sendPing { error in
+            if let error = error {
+                self.subscriber?.receive(completion: .failure(BotConnectionError(socketError: error)))
+                self.logger.error("[WebSocket] Send ping error: \n \(error)")
+            } else {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
+                    if self.webSocketTask.state == .running {
+                        self.ping()
+                    }
+                }
+            }
         }
     }
 
@@ -108,7 +125,8 @@ public extension Publisher {
     func activityStream<C>(_: C.Type, logLevel: Logger.Level = .info) -> AnyPublisher<ActivityGroup<C>, Error> where C: Codable, C: Equatable, Output == Conversation {
         compactMap { $0.streamURL }
             .mapError { $0 as Error }
-            .flatMap { ActivityStreamPublisher(streamURL: $0, logLevel: logLevel) }
+            .flatMap(maxPublishers: .max(1),
+                     { ActivityStreamPublisher(streamURL: $0, logLevel: logLevel) })
             .eraseToAnyPublisher()
     }
 }
