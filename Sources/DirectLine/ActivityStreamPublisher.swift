@@ -68,7 +68,9 @@ private final class ActivityStreamSubscription<S, ChannelData>: Subscription whe
                 self.logger.error("[WebSocket] Send ping error: \n \(error)")
             } else {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 10) {
-                    self.ping()
+                    if self.webSocketTask.state == .running {
+                        self.ping()
+                    }
                 }
             }
         }
